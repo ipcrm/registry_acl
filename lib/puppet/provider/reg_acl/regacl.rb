@@ -1,11 +1,7 @@
 require 'puppet/provider/regpowershell'
 require 'json'
-begin
-  require 'win32/security'
-  require 'win32/registry'
-rescue LoadError
-  puts "This does not appear to be a Windows system.  Provider may not function."
-end
+require 'win32/security'
+require 'win32/registry'
 
 Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowershell) do
   confine :operatingsystem => :windows
@@ -85,12 +81,12 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
       return perm.sort.join(', ')
 
     elsif arg.is_a?(String)
-      perm = Integer.new
+      perm = 0
       defined_perms = arg.split(/,/)
       defined_perms.each do |p|
-        pmask = numperms.rassoc(p)
+        pmask = numperms.rassoc(p.strip)
         raise("Invalid permission - #{p}") if  pmask.nil?
-        perm = perm | pmask
+        perm += pmask[0]
       end
       return perm
     else
@@ -209,10 +205,9 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
           tace["InheritanceFlags"]  = get_inherit(v["InheritanceFlags"])
           tace["PropagationFlags"]  = get_propagate(v["PropagationFlags"])
         rescue => ex
-          # Need a notice message here that indicates what went wrong and
-          # that a pre-existing acl is being ignored.
-          Puppet.debug "Exception caught: #{ex.inspect}"
-          Puppet.notice "Pre-existing ACL on: #{target} #{v.inspect} Ignored due to: #{ex.inspect}"
+          # Show a message in the log that there is an ACL with a problem.
+          Puppet.notice "Pre-existing ACL on : #{target} #{v.inspect}  Ignored due to: #{ex.inspect}"
+          Puppet.debug "Exception caught:  #{ex.inspect}"
         else
           newace.push(tace)
         end
@@ -326,7 +321,12 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
       if @resource[:purge].downcase.to_sym == :false
         cmd << <<-ps1.gsub(/^\s+/,"")
           $acesToRemove = $objACL.Access | ?{ $_.IsInherited -eq $false -and $_.IdentityReference -eq '#{get_account_name(p['IdentityReference'])}' }
-          if ($acesToRemove) { $objACL.RemoveAccessRule($acesToRemove) }
+          if ($acesToRemove) {
+            $acesToRemove | ForEach-Object { 
+              $remACE = New-Object System.Security.AccessControl.RegistryAccessRule($_.IdentityReference, $_.RegistryRights, $_.InheritanceFlags, $_.PropagationFlags, $_.AccessControlType)
+              $objACL.RemoveAccessRule($remACE)
+            }
+          }
         ps1
       end
 
@@ -346,7 +346,7 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
     end
 
     cmd << <<-ps1.gsub(/^\s+/, "")
-      Set-ACL '#{@resource[:target]}' $objACL -ErrorAction Stop
+      Set-ACL "#{@resource[:target]}" $objACL -ErrorAction Stop
     ps1
 
     cmd
@@ -360,6 +360,9 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
     if @property_flush[:owner]
       Puppet.debug "Reg_acl: Enter flush, set owner"
       cmd << <<-ps1.gsub(/^\s+/, "")
+        enable-privilege SeTakeOwnershipPrivilege 
+        enable-privilege SeRestorePrivilege
+        enable-privilege SeBackupPrivilege
         Set-RegOwner '#{@resource[:target]}' -Account '#{get_account_name(@resource[:owner])}' -ErrorAction Stop
       ps1
     end
@@ -371,7 +374,7 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
         ps1
       else
         cmd << <<-ps1.gsub(/^\s+/, "")
-          $objACL = get-acl '#{@resource[:target]}' -ErrorAction Stop
+          $objACL = get-acl "#{@resource[:target]}" -ErrorAction Stop
         ps1
       end
       cmd << ace_rule_builder
@@ -381,9 +384,9 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
       Puppet.debug "Reg_acl: Enter flush, inherit from parent"
       rule = @property_flush[:inherit_from_parent].downcase.to_sym.eql?(:true) ? '$False,$False' : '$True,$False'
       cmd << <<-ps1.gsub(/^\s+/, "")
-        $t = get-acl '#{@resource[:target]}'
+        $t = get-acl "#{@resource[:target]}"
         $t.SetAccessRuleProtection(#{rule})
-        Set-ACL '#{@resource[:target]}' $t -ErrorAction Stop
+        Set-ACL "#{@resource[:target]}" $t -ErrorAction Stop
       ps1
     end
 
