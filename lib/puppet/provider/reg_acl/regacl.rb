@@ -16,11 +16,23 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
     @property_flush = {}
     @acl_hash={}
     @mount_drive_cmd = String.new
+    @capability_acl_hash={}
   end
 
   def get_account_name(sid)
-    name = Puppet::Util::Windows::SID.sid_to_name(sid)
-    raise "Reg_acl: get_account_name could not find a account for sid #{sid}" unless !name.nil?
+    # Capability SIDs were introduced with Windows 8.  Permissions for these identities cannot be managed
+    #  through the GUI or PowerShell, as they are intentionally not resolvable.
+    #  https://docs.microsoft.com/en-us/windows/security/identity-protection/access-control/security-identifiers#capability-sids
+    #  https://support.microsoft.com/en-us/help/243330/well-known-security-identifiers-in-windows-operating-systems
+    #   - see "Capability SIDs" at the end of the document, and the associated note.
+    if sid.to_s.start_with? 'S-1-15-3-'
+      name = sid.to_s
+    else
+      name = Puppet::Util::Windows::SID.sid_to_name(sid)
+      # The APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES will not resolve to a SID properly - See PUP-2985
+      name = name.to_s.split(/\\/)[1] if name.to_s.include?('APPLICATION PACKAGE AUTHORITY')
+      raise "Reg_acl: get_account_name could not find a account for sid #{sid}" unless !name.nil?
+    end
     name
   end
 
@@ -32,9 +44,17 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
     # Nasty Hack space...
     # The APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES will not resolve to a SID properly - See PUP-2985
     account = account.to_s.split(/\\/)[1] if account.to_s.include?('APPLICATION PACKAGE AUTHORITY')
-
-    sid = Puppet::Util::Windows::SID.name_to_sid(account)
-    raise "Reg_acl: get_account_sid could not find a SID for account #{account}" unless !sid.nil?
+    # Capability SIDs were introduced with Windows 8.  Permissions for these identities cannot be managed
+    #  through the GUI or PowerShell, as they are intentionally not resolvable.
+    #  https://docs.microsoft.com/en-us/windows/security/identity-protection/access-control/security-identifiers#capability-sids
+    #  https://support.microsoft.com/en-us/help/243330/well-known-security-identifiers-in-windows-operating-systems
+    #   - see "Capability SIDs" at the end of the document, and the associated note.
+    if account.to_s.start_with? 'S-1-15-3-'
+      sid = account.to_s
+    else
+      sid = Puppet::Util::Windows::SID.name_to_sid(account)
+      raise "Reg_acl: get_account_sid could not find a SID for account #{account}" unless !sid.nil?
+    end
     sid
   end
 
@@ -190,6 +210,7 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
       Puppet.debug "Reg_acl: #{target} current ACE list: #{acelist}"
 
       newace = []
+      capabilityace = []
       inherit = false
 
       # acelist is not an array of hashes if there is only one ACE; need to convert it
@@ -214,11 +235,17 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
           Puppet.debug "Exception caught: #{ex.inspect}"
           Puppet.notice "Pre-existing ACL on: #{target} #{v.inspect} Ignored due to: #{ex.inspect}"
         else
-          newace.push(tace)
+          # Remove ACE for capability SIDs from CURRENT so comparisons are valid.
+          if v["IdentityReference"]["Value"].start_with?('S-1-15-3-')
+            capabilityace.push(tace)
+          else
+            newace.push(tace)
+          end
         end
       end
 
       @acl_hash[:permissions] = newace
+      @capability_acl_hash[:permissions] = capabilityace
       @acl_hash[:inherit_from_parent] = inherit
     end
 
@@ -321,11 +348,31 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
       ace_method = 'AddAccessRule'
     end
 
+    # If purging all so only SHOULD is applied, we need to modify the existing ACL
+    #   around any capability SIDs rather than replacing the entire ACL.
+    #   Remove all ACEs except capability SIDS before adding desired ACEs.
+    if @resource[:purge]. downcase.to_sym == :all
+      cmd << <<-ps1.gsub(/^\s+/,"")
+        $filteredAces = $objACL.Access | where-object { $_.IdentityReference -notlike "S-1-15-3-*"}
+        foreach ($tmpACE in $filteredAces) {
+          if ($tmpAce.IdentityReference -like 'APPLICATION PACKAGE AUTHORITY*') {
+              $secPrincipal = $tmpACE.identityreference.ToString().split('\\')[1]
+              $InheritanceFlag = $tmpACE.InheritanceFlags
+              $PropagationFlag = $tmpACE.PropagationFlags
+              $objAccess       = $tmpAce.RegistryRights
+              $objType         = $tmpACE.AccessControlType
+              $AceToRemove = New-Object System.Security.AccessControl.RegistryAccessRule ($secPrincipal,$objAccess,$InheritanceFlag,$PropagationFlag,$objType)
+          } else { $AceToRemove = $tmpACE }
+          $objACL.RemoveAccessRule($AceToRemove) | out-null
+        } 
+      ps1
+    end
+
     @property_flush[:permissions].each do |p|
       # If we adding, we need to clear out any existing ace that doesn't match
       if @resource[:purge].downcase.to_sym == :false
         cmd << <<-ps1.gsub(/^\s+/,"")
-          $acesToRemove = $objACL.Access | ?{ $_.IsInherited -eq $false -and $_.IdentityReference -eq '#{get_account_name(p['IdentityReference'])}' }
+          $acesToRemove = $objACL.Access | where-object { $_.IsInherited -eq $false -and $_.IdentityReference -eq '#{get_account_name(p['IdentityReference'])}' }
           if ($acesToRemove) { $objACL.RemoveAccessRule($acesToRemove) }
         ps1
       end
@@ -365,15 +412,9 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
     end
 
     if @property_flush[:permissions]
-      if @resource[:purge].downcase.to_sym == :all
-        cmd << <<-ps1.gsub(/^\s+/, "")
-          $objACL = New-Object System.Security.AccessControl.RegistrySecurity
-        ps1
-      else
-        cmd << <<-ps1.gsub(/^\s+/, "")
-          $objACL = get-acl '#{@resource[:target]}' -ErrorAction Stop
-        ps1
-      end
+      cmd << <<-ps1.gsub(/^\s+/, "")
+        $objACL = get-acl '#{@resource[:target]}' -ErrorAction Stop
+      ps1
       cmd << ace_rule_builder
     end
 
