@@ -102,7 +102,7 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
           perm.push(v)
         end
       end
-      return perm.sort.join(', ')
+      perm.sort.join(', ')
 
     elsif arg.is_a?(String)
       perm = Integer.new
@@ -112,7 +112,7 @@ Puppet::Type.type(:reg_acl).provide(:regacl, parent: Puppet::Provider::Regpowers
         raise("Invalid permission - #{p}") if pmask.nil?
         perm |= pmask
       end
-      return perm
+      perm
     else
       raise("Invalid permission type - #{arg.class}")
     end
