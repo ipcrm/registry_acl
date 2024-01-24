@@ -3,7 +3,6 @@
 require 'puppet/provider/regpowershell'
 require 'json'
 begin
-  require 'win32/security'
   require 'win32/registry'
 rescue LoadError
   puts 'This does not appear to be a Windows system.  Provider may not function.'
