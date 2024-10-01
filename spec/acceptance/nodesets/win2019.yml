@@ -1,12 +1,11 @@
 ---
 HOSTS:
-  windefault:
+  win2019:
     roles:
-      - default
       - windows
     platform: windows-server-amd64
-    box: gusztavvargadr/windows-server-2022-standard
-    box_version: '~> 2102'
+    box: gusztavvargadr/windows-server-2019-standard
+    box_version: '~> 1809'
     hypervisor: <%= ENV.fetch('BEAKER_HYPERVISOR', 'vagrant') %>
     vagrant_memsize: 2048
     vagrant_cpus: 2

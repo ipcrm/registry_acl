@@ -1,8 +1,7 @@
 ---
 HOSTS:
-  windefault:
+  win2022:
     roles:
-      - default
       - windows
     platform: windows-server-amd64
     box: gusztavvargadr/windows-server-2022-standard
