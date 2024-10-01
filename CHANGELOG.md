@@ -1,5 +1,8 @@
 # Changelog
 
+## 2022-10-24 Release 0.2.0
+* Add support for Windows 2022
+* Add support for Puppet 7 and stdlib 7/8
 ## 2020-11-18 Release 0.1.0
 * Add PDK compatibility
 ## 2019-01-20 Release 0.0.6
