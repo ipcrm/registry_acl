@@ -1,5 +1,8 @@
 # Changelog
 
+## 2024-10-01 Release 0.2.1
+* Add support for Puppet 8 and stdlib 9
+* Update OS support to drop EOL versions and add Windows 11
 ## 2022-10-24 Release 0.2.0
 * Add support for Windows 2022
 * Add support for Puppet 7 and stdlib 7/8

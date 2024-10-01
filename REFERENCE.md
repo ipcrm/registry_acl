@@ -10,7 +10,7 @@
 
 ## Resource types
 
-### `reg_acl`
+### <a name="reg_acl"></a>`reg_acl`
 
 Puppet type for managing Windows Registry ACLs
 
@@ -20,7 +20,7 @@ The following properties are available in the `reg_acl` type.
 
 ##### `inherit_from_parent`
 
-Valid values: ``true``, ``false``
+Valid values: `true`, `false`
 
 Should this ACL include inherited permissions? Valid values are true, false. Default: true
 
@@ -51,20 +51,25 @@ RegistryRights: String of Permissions to apply. Keep in mind you can combine val
 
 The following parameters are available in the `reg_acl` type.
 
-##### `name`
+* [`name`](#-reg_acl--name)
+* [`provider`](#-reg_acl--provider)
+* [`purge`](#-reg_acl--purge)
+* [`target`](#-reg_acl--target)
+
+##### <a name="-reg_acl--name"></a>`name`
 
 namevar
 
 The description used for uniqueness. If the target parameter is not provided name will be used.
 
-##### `provider`
+##### <a name="-reg_acl--provider"></a>`provider`
 
 The specific backend to use for this `reg_acl` resource. You will seldom need to specify this --- Puppet will usually
 discover the appropriate provider for your platform.
 
-##### `purge`
+##### <a name="-reg_acl--purge"></a>`purge`
 
-Valid values: `all`, `listed`, ``false``
+Valid values: `all`, `listed`, `false`
 
 
 Boolean to specify if all ACE should be purged that are not specifically named. Valid values are all, listed, false.
@@ -76,9 +81,9 @@ listed: Ensure that the defined ACEs in permissions parameter are removed if pre
 
 false: Default. Only compare defined ACEs in permissions and ignore any other present.
 
-Default value: ``false``
+Default value: `false`
 
-##### `target`
+##### <a name="-reg_acl--target"></a>`target`
 
 Path to the registry key.  If not provided the name parameter will be used.
 
